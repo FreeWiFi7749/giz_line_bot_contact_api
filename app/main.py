@@ -2,6 +2,7 @@
 Contact API - LINE Bot Contact Form Backend
 """
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends
@@ -14,10 +15,13 @@ from .models import Inquiry
 from .schemas import InquiryCreate, InquiryResponse, HealthResponse
 from .services import verify_id_token, send_inquiry_emails
 
-# Configure logging
+# Configure logging (stdoutに出力してRailwayでエラー扱いされないようにする)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ],
 )
 logger = logging.getLogger(__name__)
 
