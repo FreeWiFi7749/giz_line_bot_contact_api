@@ -64,3 +64,27 @@ Railway にデプロイする場合、以下の環境変数を設定してくだ
 - `ADMIN_EMAIL`: 運営通知先メールアドレス
 - `LINE_CHANNEL_ID`: LINE チャネルID
 - `LIFF_ORIGIN`: LIFF オリジン
+
+### AWS SES 認証方式（2026年ベストプラクティス）
+
+本APIは2つの認証方式をサポートしています：
+
+**開発環境（IAM Access Key）:**
+- `SES_ROLE_ARN` を設定しない
+- `AWS_ACCESS_KEY_ID` と `AWS_SECRET_ACCESS_KEY` を直接使用
+
+**本番環境（STS AssumeRole + キャッシング）:**
+- `SES_ROLE_ARN` を設定すると自動的にSTSモードに切り替わる
+- 一時認証情報を使用（1時間有効、5分前に自動更新）
+- セキュリティ向上、CloudTrail追跡可能
+
+**本番環境のセットアップ手順:**
+
+1. IAM Role 作成: `SES-Railway-Role`
+2. SES送信ポリシーをRoleにアタッチ
+3. AssumeRole用ユーザー作成: `railway-sts-user`
+4. AssumeRole権限をユーザーに付与
+5. Railway環境変数に設定:
+   - `AWS_ACCESS_KEY_ID`: railway-sts-user のアクセスキー
+   - `AWS_SECRET_ACCESS_KEY`: railway-sts-user のシークレット
+   - `SES_ROLE_ARN`: `arn:aws:iam::ACCOUNT_ID:role/SES-Railway-Role`

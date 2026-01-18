@@ -1,8 +1,12 @@
 """
 Email service using AWS SES
+
+認証方式:
+- SES_ROLE_ARN が設定されている場合: STS AssumeRole + キャッシング（本番向け）
+- SES_ROLE_ARN が未設定の場合: IAM Access Key（開発向け）
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from botocore.exceptions import ClientError
@@ -21,14 +25,116 @@ CATEGORY_NAMES = {
 }
 
 
+class SESCredentialManager:
+    """
+    AWS SES 認証情報マネージャー
+    
+    STS AssumeRole を使用して一時認証情報を取得し、キャッシュする。
+    認証情報は有効期限の5分前に自動更新される。
+    
+    SES_ROLE_ARN が未設定の場合は、直接 IAM Access Key を使用する。
+    """
+    
+    def __init__(self):
+        self.credentials = None
+        self.expiration = None
+        self._sts_client = None
+        self._use_sts = bool(settings.SES_ROLE_ARN)
+        
+        if self._use_sts:
+            logger.info("SES認証: STS AssumeRole モード（本番向け）")
+        else:
+            logger.info("SES認証: IAM Access Key モード（開発向け）")
+    
+    def _get_sts_client(self):
+        """STS クライアントを取得（遅延初期化）"""
+        if self._sts_client is None:
+            self._sts_client = boto3.client(
+                "sts",
+                region_name=settings.AWS_REGION,
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            )
+        return self._sts_client
+    
+    def get_ses_client(self):
+        """
+        キャッシュされた認証情報で SES クライアントを返す
+        
+        STS モードの場合:
+        - キャッシュが有効なら再利用
+        - 有効期限の5分前に自動更新
+        
+        IAM Access Key モードの場合:
+        - 直接認証情報を使用
+        """
+        if not self._use_sts:
+            return self._create_direct_ses_client()
+        
+        now = datetime.now(timezone.utc)
+        
+        if self.credentials and self.expiration:
+            expiration_aware = self.expiration
+            if expiration_aware.tzinfo is None:
+                expiration_aware = expiration_aware.replace(tzinfo=timezone.utc)
+            
+            if expiration_aware > now + timedelta(minutes=5):
+                return self._create_ses_client_from_credentials(self.credentials)
+        
+        self._refresh_credentials()
+        return self._create_ses_client_from_credentials(self.credentials)
+    
+    def _refresh_credentials(self):
+        """AssumeRole で新しい認証情報を取得"""
+        try:
+            sts_client = self._get_sts_client()
+            response = sts_client.assume_role(
+                RoleArn=settings.SES_ROLE_ARN,
+                RoleSessionName="railway-ses-session",
+                DurationSeconds=3600,
+            )
+            self.credentials = response["Credentials"]
+            self.expiration = response["Credentials"]["Expiration"]
+            logger.info(f"SES認証情報を更新: 有効期限 {self.expiration}")
+        except ClientError as e:
+            logger.error(f"AssumeRole エラー: {e}")
+            raise
+    
+    def _create_direct_ses_client(self):
+        """IAM Access Key で直接 SES クライアントを生成"""
+        return boto3.client(
+            "ses",
+            region_name=settings.AWS_REGION,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        )
+    
+    def _create_ses_client_from_credentials(self, credentials):
+        """一時認証情報で SES クライアントを生成"""
+        return boto3.client(
+            "ses",
+            region_name=settings.AWS_REGION,
+            aws_access_key_id=credentials["AccessKeyId"],
+            aws_secret_access_key=credentials["SecretAccessKey"],
+            aws_session_token=credentials["SessionToken"],
+        )
+
+
+# グローバルインスタンス（シングルトン）
+_credential_manager = None
+
+
+def get_credential_manager() -> SESCredentialManager:
+    """SES 認証情報マネージャーを取得"""
+    global _credential_manager
+    if _credential_manager is None:
+        _credential_manager = SESCredentialManager()
+    return _credential_manager
+
+
 def get_ses_client():
-    """Get AWS SES client"""
-    return boto3.client(
-        "ses",
-        region_name=settings.AWS_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    )
+    """Get AWS SES client（認証方式を自動選択）"""
+    return get_credential_manager().get_ses_client()
 
 
 def get_category_display_name(category: str) -> str:

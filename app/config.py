@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     SES_FROM_EMAIL: str = "no-reply@gizmodojp-line-bot.frwi.tech"
     ADMIN_EMAIL: str = "admin@example.com"
     
+    # AWS STS (本番向け - 設定されている場合はSTS AssumeRoleを使用)
+    SES_ROLE_ARN: str = ""  # 例: arn:aws:iam::123456789012:role/SES-Railway-Role
+    
     # LINE
     LINE_CHANNEL_ID: str = ""
     
