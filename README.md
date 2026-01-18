@@ -52,39 +52,43 @@ poetry install
 poetry run uvicorn app.main:app --reload --port 8000
 ```
 
-## デプロイ
+## デプロイ（Railway）
 
-Railway にデプロイする場合、以下の環境変数を設定してください：
+### AWS SES 認証設定（2026年ベストプラクティス）
 
-- `DATABASE_URL`: PostgreSQL 接続URL
-- `AWS_REGION`: AWS リージョン
-- `AWS_ACCESS_KEY_ID`: AWS アクセスキー
-- `AWS_SECRET_ACCESS_KEY`: AWS シークレットキー
-- `SES_FROM_EMAIL`: 送信元メールアドレス
-- `ADMIN_EMAIL`: 運営通知先メールアドレス
-- `LINE_CHANNEL_ID`: LINE チャネルID
-- `LIFF_ORIGIN`: LIFF オリジン
+本番環境では **STS AssumeRole** を使用します。一時認証情報による高セキュリティな認証方式です。
 
-### AWS SES 認証方式（2026年ベストプラクティス）
+#### 必要な AWS リソース
 
-本APIは2つの認証方式をサポートしています：
+1. **IAM Role**: `SES-Railway-Role`
+   - ポリシー: `AmazonSESFullAccess`（または `ses:SendEmail`, `ses:SendRawEmail` 権限）
+   - 信頼関係: AssumeRole 用ユーザーからのアクセスを許可
 
-**開発環境（IAM Access Key）:**
-- `SES_ROLE_ARN` を設定しない
-- `AWS_ACCESS_KEY_ID` と `AWS_SECRET_ACCESS_KEY` を直接使用
+2. **IAM User**: `railway-sts-user`
+   - ポリシー: `sts:AssumeRole` 権限（上記 Role に対して）
+   - アクセスキー: Railway 環境変数に設定
 
-**本番環境（STS AssumeRole + キャッシング）:**
-- `SES_ROLE_ARN` を設定すると自動的にSTSモードに切り替わる
-- 一時認証情報を使用（1時間有効、5分前に自動更新）
-- セキュリティ向上、CloudTrail追跡可能
+#### Railway 環境変数
 
-**本番環境のセットアップ手順:**
+```
+DATABASE_URL=postgresql+asyncpg://...
+AWS_REGION=us-east-2
+AWS_ACCESS_KEY_ID=<railway-sts-user のアクセスキー>
+AWS_SECRET_ACCESS_KEY=<railway-sts-user のシークレット>
+SES_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/SES-Railway-Role
+SES_FROM_EMAIL=no-reply@gizmodojp-line-bot.frwi.tech
+ADMIN_EMAIL=admin@example.com
+LINE_CHANNEL_ID=<LINE チャネルID>
+LIFF_ORIGIN=https://liff.line.me
+ALLOWED_ORIGINS=https://liff.line.me
+```
 
-1. IAM Role 作成: `SES-Railway-Role`
-2. SES送信ポリシーをRoleにアタッチ
-3. AssumeRole用ユーザー作成: `railway-sts-user`
-4. AssumeRole権限をユーザーに付与
-5. Railway環境変数に設定:
-   - `AWS_ACCESS_KEY_ID`: railway-sts-user のアクセスキー
-   - `AWS_SECRET_ACCESS_KEY`: railway-sts-user のシークレット
-   - `SES_ROLE_ARN`: `arn:aws:iam::ACCOUNT_ID:role/SES-Railway-Role`
+#### 認証の仕組み
+
+- `SES_ROLE_ARN` が設定されている場合、STS AssumeRole で一時認証情報を取得
+- 認証情報は1時間有効、有効期限5分前に自動更新（キャッシング）
+- CloudTrail で全ての SES 送信を追跡可能
+
+#### 開発環境（オプション）
+
+`SES_ROLE_ARN` を空または未設定にすると、`AWS_ACCESS_KEY_ID` と `AWS_SECRET_ACCESS_KEY` を直接使用する IAM Access Key モードで動作します。
