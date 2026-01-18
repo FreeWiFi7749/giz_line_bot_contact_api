@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     # LINE
     LINE_CHANNEL_ID: str = ""
     
-    # CORS
-    LIFF_ORIGIN: str = "https://liff.line.me"
-    ALLOWED_ORIGINS: str = "https://liff.line.me"
+    # CORS - LINE Mini App uses miniapp.line.me, legacy LIFF uses liff.line.me
+    LIFF_ORIGIN: str = "https://miniapp.line.me"
+    ALLOWED_ORIGINS: str = "https://liff.line.me,https://miniapp.line.me"
     
     # App
     DEBUG: bool = False
