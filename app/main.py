@@ -15,13 +15,24 @@ from .models import Inquiry
 from .schemas import InquiryCreate, InquiryResponse, HealthResponse
 from .services import verify_id_token, send_inquiry_emails
 
-# Configure logging (stdoutに出力してRailwayでエラー扱いされないようにする)
+# Configure logging (Railwayでログレベルが正しく表示されるようにする)
+# INFO/DEBUG → stdout（Railwayで通常ログとして表示）
+# WARNING/ERROR/CRITICAL → stderr（Railwayでエラーログとして表示）
+class InfoFilter(logging.Filter):
+    def filter(self, record):
+        return record.levelno <= logging.INFO
+
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.setLevel(logging.DEBUG)
+stdout_handler.addFilter(InfoFilter())
+
+stderr_handler = logging.StreamHandler(sys.stderr)
+stderr_handler.setLevel(logging.WARNING)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=[stdout_handler, stderr_handler],
 )
 logger = logging.getLogger(__name__)
 
