@@ -16,8 +16,8 @@ from .schemas import InquiryCreate, InquiryResponse, HealthResponse
 from .services import verify_id_token, send_inquiry_emails
 
 # Configure logging (Railwayでログレベルが正しく表示されるようにする)
-# INFO/DEBUG → stdout（Railwayで通常ログとして表示）
-# WARNING/ERROR/CRITICAL → stderr（Railwayでエラーログとして表示）
+# INFO/DEBUG → stdout(Railwayで通常ログとして表示)
+# WARNING/ERROR/CRITICAL → stderr(Railwayでエラーログとして表示)
 class InfoFilter(logging.Filter):
     def filter(self, record):
         return record.levelno <= logging.INFO
@@ -33,6 +33,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[stdout_handler, stderr_handler],
+    force=True,
 )
 logger = logging.getLogger(__name__)
 
