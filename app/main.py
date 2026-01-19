@@ -13,7 +13,7 @@ from .config import settings
 from .database import get_db, init_db
 from .models import Inquiry
 from .schemas import InquiryCreate, InquiryResponse, HealthResponse
-from .services import verify_id_token, send_inquiry_emails
+from .services import verify_id_token, send_inquiry_emails, verify_turnstile_token
 
 # Configure logging (Railwayでログレベルが正しく表示されるようにする)
 # INFO/DEBUG → stdout(Railwayで通常ログとして表示)
@@ -82,11 +82,21 @@ async def submit_inquiry(
     """
     Submit a contact form inquiry
     
+    - Verifies Cloudflare Turnstile token (if provided)
     - Verifies LINE ID token (if provided)
     - Saves inquiry to database
     - Sends confirmation email to user
     - Sends notification email to admin
     """
+    # Verify Turnstile token if provided (human verification)
+    if data.turnstileToken:
+        is_human = await verify_turnstile_token(data.turnstileToken)
+        if not is_human:
+            raise HTTPException(
+                status_code=400,
+                detail="認証に失敗しました。ページを再読み込みしてお試しください。"
+            )
+    
     line_user_id = None
     
     # Verify LINE ID token if provided
