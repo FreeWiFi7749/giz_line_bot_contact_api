@@ -127,6 +127,7 @@ def _send_user_confirmation_email(data: InquiryCreate, category_name: str) -> bo
             
             <p style="color: #999; font-size: 12px; line-height: 1.5;">
                 このメールは自動送信です。<br>
+                追加のご質問がある場合は、このメールに返信してください。<br>
                 心当たりがない場合は、このメールは破棄してください。
             </p>
         </div>
@@ -144,12 +145,14 @@ def _send_user_confirmation_email(data: InquiryCreate, category_name: str) -> bo
 
 {safe_message}
 
-このメールは自動送信です。"""
+このメールは自動送信です。
+追加のご質問がある場合は、このメールに返信してください。"""
     
     try:
         resp = resend.Emails.send({
             "from": settings.EMAIL_FROM,
             "to": [data.email],
+            "reply_to": settings.ADMIN_EMAIL,
             "subject": "【Gizmodo Japan LINE Bot】お問い合わせを受け付けました",
             "html": user_html,
             "text": user_text,
@@ -193,7 +196,7 @@ def _send_admin_notification_email(data: InquiryCreate, category_name: str, time
             <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
             
             <p style="color: #666; font-size: 14px; line-height: 1.5;">
-                このメールに返信すると、ユーザー ({safe_email}) に直接届きます。
+                ※このメールは通知専用です。ユーザーに返信する場合は、上記メールアドレス宛に新規メールを作成してください。
             </p>
         </div>
     </body>
@@ -210,13 +213,12 @@ def _send_admin_notification_email(data: InquiryCreate, category_name: str, time
 ▼内容
 {safe_message}
 
-※このメールに返信するとユーザーに届きます。"""
+※このメールは通知専用です。ユーザーに返信する場合は、上記メールアドレス宛に新規メールを作成してください。"""
     
     try:
         resp = resend.Emails.send({
             "from": settings.EMAIL_FROM,
             "to": [settings.ADMIN_EMAIL],
-            "reply_to": data.email,
             "subject": f"【LINE Bot お問い合わせ】{safe_name} さんから新規問い合わせ",
             "html": admin_html,
             "text": admin_text,
