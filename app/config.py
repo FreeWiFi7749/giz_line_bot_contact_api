@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # LINE
     LINE_CHANNEL_ID: str = ""
     
+    # Cloudflare Turnstile (human verification)
+    TURNSTILE_SECRET_KEY: str = ""
+    
     # CORS - LINE Mini App uses miniapp.line.me, legacy LIFF uses liff.line.me
     LIFF_ORIGIN: str = "https://miniapp.line.me"
     ALLOWED_ORIGINS: str = "https://liff.line.me,https://miniapp.line.me"

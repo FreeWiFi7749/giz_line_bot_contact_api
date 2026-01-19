@@ -14,6 +14,7 @@ class InquiryCreate(BaseModel):
     category: str = Field(..., min_length=1, max_length=50, description="Inquiry category")
     message: str = Field(..., min_length=10, max_length=4000, description="Inquiry message")
     idToken: Optional[str] = Field(None, description="LINE ID token for verification")
+    turnstileToken: Optional[str] = Field(None, description="Cloudflare Turnstile token for human verification")
 
 
 class InquiryResponse(BaseModel):
