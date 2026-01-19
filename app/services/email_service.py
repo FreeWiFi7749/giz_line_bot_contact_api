@@ -45,8 +45,15 @@ def _ensure_resend_initialized() -> bool:
     if _resend_initialized:
         return True
     
+    # Validate all required settings early
     if not settings.RESEND_API_KEY:
         logger.warning("RESEND_API_KEY not set - email sending will fail")
+        return False
+    if not settings.EMAIL_FROM:
+        logger.warning("EMAIL_FROM not set - email sending will fail")
+        return False
+    if not settings.ADMIN_EMAIL:
+        logger.warning("ADMIN_EMAIL not set - admin notification will fail")
         return False
     
     resend.api_key = settings.RESEND_API_KEY
