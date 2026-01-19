@@ -1,22 +1,29 @@
 """
-Email service using AWS SES
+Email service using Resend
 
-認証方式:
-- SES_ROLE_ARN が設定されている場合: STS AssumeRole + キャッシング（本番向け）
-- SES_ROLE_ARN が未設定の場合: IAM Access Key（開発向け）
+Resend is a modern email API for developers.
+https://resend.com/docs
+
+無料枠: 3,000通/月
 """
+import html
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-import boto3
-from botocore.exceptions import ClientError
+import resend
 
 from ..config import settings
 from ..schemas import InquiryCreate
 
 logger = logging.getLogger(__name__)
 
-# Category display names
+# Lazy initialization flag
+_resend_initialized = False
+
+# Japan Standard Time
+JST = ZoneInfo("Asia/Tokyo")
+
 CATEGORY_NAMES = {
     "general": "一般的なお問い合わせ",
     "support": "サポート",
@@ -25,116 +32,34 @@ CATEGORY_NAMES = {
 }
 
 
-class SESCredentialManager:
+def _ensure_resend_initialized() -> bool:
     """
-    AWS SES 認証情報マネージャー
+    Ensure Resend is initialized (lazy initialization pattern).
+    Only initializes once per application lifetime.
     
-    STS AssumeRole を使用して一時認証情報を取得し、キャッシュする。
-    認証情報は有効期限の5分前に自動更新される。
-    
-    SES_ROLE_ARN が未設定の場合は、直接 IAM Access Key を使用する。
+    Returns:
+        True if initialized successfully, False otherwise
     """
+    global _resend_initialized
     
-    def __init__(self):
-        self.credentials = None
-        self.expiration = None
-        self._sts_client = None
-        self._use_sts = bool(settings.SES_ROLE_ARN)
-        
-        if self._use_sts:
-            logger.info("SES認証: STS AssumeRole モード（本番向け）")
-        else:
-            logger.info("SES認証: IAM Access Key モード（開発向け）")
+    if _resend_initialized:
+        return True
     
-    def _get_sts_client(self):
-        """STS クライアントを取得（遅延初期化）"""
-        if self._sts_client is None:
-            self._sts_client = boto3.client(
-                "sts",
-                region_name=settings.AWS_REGION,
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            )
-        return self._sts_client
+    # Validate all required settings early
+    if not settings.RESEND_API_KEY:
+        logger.warning("RESEND_API_KEY not set - email sending will fail")
+        return False
+    if not settings.EMAIL_FROM:
+        logger.warning("EMAIL_FROM not set - email sending will fail")
+        return False
+    if not settings.ADMIN_EMAIL:
+        logger.warning("ADMIN_EMAIL not set - admin notification will fail")
+        return False
     
-    def get_ses_client(self):
-        """
-        キャッシュされた認証情報で SES クライアントを返す
-        
-        STS モードの場合:
-        - キャッシュが有効なら再利用
-        - 有効期限の5分前に自動更新
-        
-        IAM Access Key モードの場合:
-        - 直接認証情報を使用
-        """
-        if not self._use_sts:
-            return self._create_direct_ses_client()
-        
-        now = datetime.now(timezone.utc)
-        
-        if self.credentials and self.expiration:
-            expiration_aware = self.expiration
-            if expiration_aware.tzinfo is None:
-                expiration_aware = expiration_aware.replace(tzinfo=timezone.utc)
-            
-            if expiration_aware > now + timedelta(minutes=5):
-                return self._create_ses_client_from_credentials(self.credentials)
-        
-        self._refresh_credentials()
-        return self._create_ses_client_from_credentials(self.credentials)
-    
-    def _refresh_credentials(self):
-        """AssumeRole で新しい認証情報を取得"""
-        try:
-            sts_client = self._get_sts_client()
-            response = sts_client.assume_role(
-                RoleArn=settings.SES_ROLE_ARN,
-                RoleSessionName="railway-ses-session",
-                DurationSeconds=3600,
-            )
-            self.credentials = response["Credentials"]
-            self.expiration = response["Credentials"]["Expiration"]
-            logger.info(f"SES認証情報を更新: 有効期限 {self.expiration}")
-        except ClientError as e:
-            logger.error(f"AssumeRole エラー: {e}")
-            raise
-    
-    def _create_direct_ses_client(self):
-        """IAM Access Key で直接 SES クライアントを生成"""
-        return boto3.client(
-            "ses",
-            region_name=settings.AWS_REGION,
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        )
-    
-    def _create_ses_client_from_credentials(self, credentials):
-        """一時認証情報で SES クライアントを生成"""
-        return boto3.client(
-            "ses",
-            region_name=settings.AWS_REGION,
-            aws_access_key_id=credentials["AccessKeyId"],
-            aws_secret_access_key=credentials["SecretAccessKey"],
-            aws_session_token=credentials["SessionToken"],
-        )
-
-
-# グローバルインスタンス（シングルトン）
-_credential_manager = None
-
-
-def get_credential_manager() -> SESCredentialManager:
-    """SES 認証情報マネージャーを取得"""
-    global _credential_manager
-    if _credential_manager is None:
-        _credential_manager = SESCredentialManager()
-    return _credential_manager
-
-
-def get_ses_client():
-    """Get AWS SES client（認証方式を自動選択）"""
-    return get_credential_manager().get_ses_client()
+    resend.api_key = settings.RESEND_API_KEY
+    _resend_initialized = True
+    logger.info("Resend initialized")
+    return True
 
 
 def get_category_display_name(category: str) -> str:
@@ -152,18 +77,28 @@ def send_inquiry_emails(data: InquiryCreate) -> bool:
     Returns:
         True if both emails sent successfully, False otherwise
     """
-    ses = get_ses_client()
-    category_name = get_category_display_name(data.category)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if not _ensure_resend_initialized():
+        logger.error("RESEND_API_KEY not configured")
+        return False
     
-    user_success = _send_user_confirmation_email(ses, data, category_name)
-    admin_success = _send_admin_notification_email(ses, data, category_name, timestamp)
+    category_name = get_category_display_name(data.category)
+    # Use timezone-aware datetime in JST
+    timestamp = datetime.now(tz=JST).strftime("%Y-%m-%d %H:%M:%S")
+    
+    user_success = _send_user_confirmation_email(data, category_name)
+    admin_success = _send_admin_notification_email(data, category_name, timestamp)
     
     return user_success and admin_success
 
 
-def _send_user_confirmation_email(ses, data: InquiryCreate, category_name: str) -> bool:
+def _send_user_confirmation_email(data: InquiryCreate, category_name: str) -> bool:
     """Send confirmation email to user"""
+    # Escape user input to prevent XSS/HTML injection
+    safe_name = html.escape(data.name)
+    safe_email = html.escape(data.email)
+    safe_message = html.escape(data.message)
+    safe_category = html.escape(category_name)
+    
     user_html = f"""
     <html>
     <head><meta charset="UTF-8"></head>
@@ -171,7 +106,7 @@ def _send_user_confirmation_email(ses, data: InquiryCreate, category_name: str) 
         <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
             <h1 style="color: #333; margin-bottom: 20px; font-size: 24px;">お問い合わせを受け付けました</h1>
             <p style="color: #666; line-height: 1.6;">
-                {data.name} 様
+                {safe_name} 様
             </p>
             <p style="color: #666; line-height: 1.6;">
                 お問い合わせありがとうございます。<br>
@@ -180,11 +115,11 @@ def _send_user_confirmation_email(ses, data: InquiryCreate, category_name: str) 
             </p>
             
             <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #00B900;">
-                <p style="margin: 8px 0; color: #333;"><strong>種別:</strong> {category_name}</p>
-                <p style="margin: 8px 0; color: #333;"><strong>メールアドレス:</strong> {data.email}</p>
+                <p style="margin: 8px 0; color: #333;"><strong>種別:</strong> {safe_category}</p>
+                <p style="margin: 8px 0; color: #333;"><strong>メールアドレス:</strong> {safe_email}</p>
                 <p style="margin: 8px 0; color: #333;"><strong>内容:</strong></p>
                 <div style="background-color: #ffffff; padding: 15px; border-radius: 4px; margin-top: 10px;">
-                    <pre style="white-space: pre-wrap; font-family: inherit; color: #333; margin: 0;">{data.message}</pre>
+                    <pre style="white-space: pre-wrap; font-family: inherit; color: #333; margin: 0;">{safe_message}</pre>
                 </div>
             </div>
             
@@ -199,42 +134,43 @@ def _send_user_confirmation_email(ses, data: InquiryCreate, category_name: str) 
     </html>
     """
     
-    user_text = f"""{data.name} 様
+    user_text = f"""{safe_name} 様
 
 お問い合わせありがとうございます。
 
 ▼お問い合わせ内容
-種別: {category_name}
-メールアドレス: {data.email}
+種別: {safe_category}
+メールアドレス: {safe_email}
 
-{data.message}
+{safe_message}
 
 このメールは自動送信です。"""
     
     try:
-        ses.send_email(
-            Source=settings.SES_FROM_EMAIL,
-            Destination={"ToAddresses": [data.email]},
-            Message={
-                "Subject": {
-                    "Data": "【Gizmodo Japan LINE Bot】お問い合わせを受け付けました",
-                    "Charset": "UTF-8",
-                },
-                "Body": {
-                    "Text": {"Data": user_text, "Charset": "UTF-8"},
-                    "Html": {"Data": user_html, "Charset": "UTF-8"},
-                },
-            },
-        )
-        logger.info(f"User confirmation email sent to {data.email}")
+        resp = resend.Emails.send({
+            "from": settings.EMAIL_FROM,
+            "to": [data.email],
+            "subject": "【Gizmodo Japan LINE Bot】お問い合わせを受け付けました",
+            "html": user_html,
+            "text": user_text,
+        })
+        email_id = resp.get("id") if isinstance(resp, dict) else getattr(resp, "id", "unknown")
+        logger.info("User confirmation email sent to %s (id: %s)", data.email, email_id)
         return True
-    except ClientError as e:
-        logger.error(f"Failed to send user confirmation email: {e}")
+    except Exception:
+        logger.exception("Failed to send user confirmation email")
         return False
 
 
-def _send_admin_notification_email(ses, data: InquiryCreate, category_name: str, timestamp: str) -> bool:
+def _send_admin_notification_email(data: InquiryCreate, category_name: str, timestamp: str) -> bool:
     """Send notification email to admin"""
+    # Escape user input to prevent XSS/HTML injection
+    safe_name = html.escape(data.name)
+    safe_email = html.escape(data.email)
+    safe_message = html.escape(data.message)
+    safe_category = html.escape(category_name)
+    safe_timestamp = html.escape(timestamp)
+    
     admin_html = f"""
     <html>
     <head><meta charset="UTF-8"></head>
@@ -243,21 +179,21 @@ def _send_admin_notification_email(ses, data: InquiryCreate, category_name: str,
             <h1 style="color: #333; margin-bottom: 20px; font-size: 24px;">新しいお問い合わせ</h1>
             
             <div style="background-color: #e3f2fd; padding: 20px; border-left: 4px solid #2196f3; border-radius: 4px; margin: 20px 0;">
-                <p style="margin: 8px 0; color: #333;"><strong>名前:</strong> {data.name}</p>
-                <p style="margin: 8px 0; color: #333;"><strong>メール:</strong> <a href="mailto:{data.email}" style="color: #2196f3;">{data.email}</a></p>
-                <p style="margin: 8px 0; color: #333;"><strong>種別:</strong> {category_name}</p>
-                <p style="margin: 8px 0; color: #333;"><strong>送信日時:</strong> {timestamp}</p>
+                <p style="margin: 8px 0; color: #333;"><strong>名前:</strong> {safe_name}</p>
+                <p style="margin: 8px 0; color: #333;"><strong>メール:</strong> <a href="mailto:{safe_email}" style="color: #2196f3;">{safe_email}</a></p>
+                <p style="margin: 8px 0; color: #333;"><strong>種別:</strong> {safe_category}</p>
+                <p style="margin: 8px 0; color: #333;"><strong>送信日時:</strong> {safe_timestamp}</p>
             </div>
             
             <p style="color: #333; font-weight: bold; margin-top: 25px;">内容:</p>
             <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 10px;">
-                <pre style="white-space: pre-wrap; font-family: inherit; color: #333; margin: 0;">{data.message}</pre>
+                <pre style="white-space: pre-wrap; font-family: inherit; color: #333; margin: 0;">{safe_message}</pre>
             </div>
             
             <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
             
             <p style="color: #666; font-size: 14px; line-height: 1.5;">
-                このメールに返信すると、ユーザー ({data.email}) に直接届きます。
+                このメールに返信すると、ユーザー ({safe_email}) に直接届きます。
             </p>
         </div>
     </body>
@@ -266,34 +202,28 @@ def _send_admin_notification_email(ses, data: InquiryCreate, category_name: str,
     
     admin_text = f"""新しいお問い合わせがありました。
 
-名前: {data.name}
-メール: {data.email}
-種別: {category_name}
-送信日時: {timestamp}
+名前: {safe_name}
+メール: {safe_email}
+種別: {safe_category}
+送信日時: {safe_timestamp}
 
 ▼内容
-{data.message}
+{safe_message}
 
 ※このメールに返信するとユーザーに届きます。"""
     
     try:
-        ses.send_email(
-            Source=settings.SES_FROM_EMAIL,
-            Destination={"ToAddresses": [settings.ADMIN_EMAIL]},
-            ReplyToAddresses=[data.email],
-            Message={
-                "Subject": {
-                    "Data": f"【LINE Bot お問い合わせ】{data.name} さんから新規問い合わせ",
-                    "Charset": "UTF-8",
-                },
-                "Body": {
-                    "Text": {"Data": admin_text, "Charset": "UTF-8"},
-                    "Html": {"Data": admin_html, "Charset": "UTF-8"},
-                },
-            },
-        )
-        logger.info(f"Admin notification email sent to {settings.ADMIN_EMAIL}")
+        resp = resend.Emails.send({
+            "from": settings.EMAIL_FROM,
+            "to": [settings.ADMIN_EMAIL],
+            "reply_to": data.email,
+            "subject": f"【LINE Bot お問い合わせ】{safe_name} さんから新規問い合わせ",
+            "html": admin_html,
+            "text": admin_text,
+        })
+        email_id = resp.get("id") if isinstance(resp, dict) else getattr(resp, "id", "unknown")
+        logger.info("Admin notification email sent to %s (id: %s)", settings.ADMIN_EMAIL, email_id)
         return True
-    except ClientError as e:
-        logger.error(f"Failed to send admin notification email: {e}")
+    except Exception:
+        logger.exception("Failed to send admin notification email")
         return False

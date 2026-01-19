@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "giz-line-bot-contact-api"
 version = "0.1.0"
-description = "LINE Bot Contact Form API with SES integration"
+description = "LINE Bot Contact Form API with Resend email integration"
 authors = ["FreeWiFi7749"]
 readme = "README.md"
 
@@ -12,7 +12,6 @@ uvicorn = "^0.40.0"
 python-multipart = "^0.0.21"
 pydantic = "^2.12.5"
 email-validator = "^2.3.0"
-boto3 = "^1.42.30"
 python-jose = "^3.5.0"
 requests = "^2.32.5"
 sqlalchemy = "^2.0.45"
@@ -21,6 +20,7 @@ psycopg2-binary = "^2.9.11"
 python-dotenv = "^1.2.1"
 pydantic-settings = "^2.12.0"
 httpx = "^0.28.1"
+resend = "^2.19.0"
 
 
 [build-system]

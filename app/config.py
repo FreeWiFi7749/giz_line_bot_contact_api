@@ -11,15 +11,10 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://localhost/contact_db"
     
-    # AWS SES
-    AWS_REGION: str = "us-east-2"
-    AWS_ACCESS_KEY_ID: str = ""
-    AWS_SECRET_ACCESS_KEY: str = ""
-    SES_FROM_EMAIL: str = "no-reply@gizmodojp-line-bot.frwi.tech"
+    # Resend (Email API)
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "Gizmodo Japan LINE Bot <no-reply@gizmodojp-line-bot.frwi.tech>"
     ADMIN_EMAIL: str = "admin@example.com"
-    
-    # AWS STS (本番向け - 設定されている場合はSTS AssumeRoleを使用)
-    SES_ROLE_ARN: str = ""  # 例: arn:aws:iam::123456789012:role/SES-Railway-Role
     
     # LINE
     LINE_CHANNEL_ID: str = ""
