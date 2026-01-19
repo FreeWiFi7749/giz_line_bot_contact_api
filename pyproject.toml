@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "giz-line-bot-contact-api"
 version = "0.1.0"
-description = "LINE Bot Contact Form API with SES integration"
+description = "LINE Bot Contact Form API with Resend email integration"
 authors = ["FreeWiFi7749"]
 readme = "README.md"
 
