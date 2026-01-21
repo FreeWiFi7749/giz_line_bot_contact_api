@@ -15,6 +15,7 @@ from .models import Inquiry
 from .schemas import InquiryCreate, InquiryResponse, HealthResponse
 from .services import verify_id_token, send_inquiry_emails, verify_turnstile_token
 
+
 # Configure logging (Railwayでログレベルが正しく表示されるようにする)
 # INFO/DEBUG → stdout(Railwayで通常ログとして表示)
 # WARNING/ERROR/CRITICAL → stderr(Railwayでエラーログとして表示)
@@ -22,19 +23,40 @@ class InfoFilter(logging.Filter):
     def filter(self, record):
         return record.levelno <= logging.INFO
 
-stdout_handler = logging.StreamHandler(sys.stdout)
-stdout_handler.setLevel(logging.DEBUG)
-stdout_handler.addFilter(InfoFilter())
 
-stderr_handler = logging.StreamHandler(sys.stderr)
-stderr_handler.setLevel(logging.WARNING)
+def setup_logging():
+    """Setup logging for both application and uvicorn"""
+    # Create handlers
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(logging.DEBUG)
+    stdout_handler.addFilter(InfoFilter())
+    stdout_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[stdout_handler, stderr_handler],
-    force=True,
-)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.handlers = []
+    root_logger.addHandler(stdout_handler)
+    root_logger.addHandler(stderr_handler)
+
+    # Configure uvicorn loggers to use the same handlers
+    for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
+        uvicorn_logger = logging.getLogger(logger_name)
+        uvicorn_logger.handlers = []
+        uvicorn_logger.addHandler(stdout_handler)
+        uvicorn_logger.addHandler(stderr_handler)
+        uvicorn_logger.propagate = False
+
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
