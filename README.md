@@ -1,21 +1,35 @@
 # Gizmodo Japan LINE Bot Contact API
 
-LINE Bot お問い合わせフォーム用バックエンドAPI
+LINE Bot お問い合わせフォーム用バックエンドAPI。LINE LIFF からのお問い合わせを受け付け、データベースに保存し、確認メールを送信します。
 
-## 機能
+## 主な機能
 
 - LINE LIFF からのお問い合わせフォーム送信を受け付け
 - LINE IDトークン検証によるユーザー認証
-- PostgreSQL へのお問い合わせ保存
-- AWS SES によるメール送信
-  - ユーザー宛確認メール
-  - 運営宛通知メール（Reply-To でユーザーに直接返信可能）
+- Cloudflare Turnstile によるボット対策（人間確認）
+- PostgreSQL へのお問い合わせ保存（非同期）
+- Resend API によるメール送信
+  - ユーザー宛確認メール（HTML/テキスト両対応）
+  - 運営宛通知メール
+
+## 技術スタック
+
+| カテゴリ | 技術 |
+|---------|------|
+| フレームワーク | FastAPI |
+| 言語 | Python 3.11+ |
+| データベース | PostgreSQL（asyncpg） |
+| ORM | SQLAlchemy 2.0（非同期対応） |
+| メール送信 | Resend API |
+| 認証 | python-jose（LINE IDトークン検証） |
+| バリデーション | Pydantic 2 |
+| デプロイ | Railway |
 
 ## API エンドポイント
 
 ### POST /api/inquiry
 
-お問い合わせを送信
+お問い合わせを送信します。
 
 **リクエストボディ:**
 ```json
@@ -24,71 +38,132 @@ LINE Bot お問い合わせフォーム用バックエンドAPI
   "email": "email@example.com",
   "category": "general",
   "message": "お問い合わせ内容",
-  "idToken": "LINE_ID_TOKEN"
+  "idToken": "LINE_ID_TOKEN（オプション）",
+  "turnstileToken": "TURNSTILE_TOKEN（オプション）"
 }
 ```
 
 **カテゴリ:**
-- `general`: 一般的なお問い合わせ
-- `support`: サポート
-- `bug`: 不具合報告
-- `suggestion`: ご提案
+| 値 | 説明 |
+|----|------|
+| `general` | 一般的なお問い合わせ |
+| `support` | サポート |
+| `bug` | 不具合報告 |
+| `suggestion` | ご提案 |
+
+**レスポンス:**
+```json
+{
+  "ok": true,
+  "message": "お問い合わせを受け付けました。確認メールをお送りしました。"
+}
+```
 
 ### GET /health
 
-ヘルスチェック
+ヘルスチェックエンドポイント。
 
-## 環境変数
+**レスポンス:**
+```json
+{
+  "status": "ok"
+}
+```
 
-`.env.example` を参照してください。
+### GET /
 
-## ローカル開発
+ルートエンドポイント。APIの基本情報を返します。
+
+## プロジェクト構造
+
+```
+giz_line_bot_contact_api/
+├── app/
+│   ├── __init__.py
+│   ├── main.py           # FastAPI アプリケーション
+│   ├── config.py         # 設定管理
+│   ├── database.py       # データベース接続
+│   ├── models.py         # SQLAlchemy モデル
+│   ├── schemas.py        # Pydantic スキーマ
+│   └── services/         # ビジネスロジック
+│       ├── __init__.py
+│       ├── email_service.py   # Resend メール送信
+│       ├── line_auth.py       # LINE IDトークン検証
+│       └── turnstile.py       # Cloudflare Turnstile 検証
+├── pyproject.toml        # Poetry 依存関係
+├── poetry.lock
+└── railway.toml          # Railway デプロイ設定
+```
+
+## セットアップ
+
+### 1. 依存関係のインストール
 
 ```bash
-# 依存関係インストール
 poetry install
+```
 
-# 開発サーバー起動
+### 2. 環境変数の設定
+
+```bash
+cp .env.example .env
+```
+
+`.env` ファイルを編集し、以下の必須項目を設定してください。
+
+| 環境変数 | 説明 |
+|---------|------|
+| `DATABASE_URL` | PostgreSQL 接続URL（asyncpg形式） |
+| `RESEND_API_KEY` | Resend API キー |
+| `EMAIL_FROM` | 送信元メールアドレス |
+| `ADMIN_EMAIL` | 管理者通知先メールアドレス |
+| `LINE_CHANNEL_ID` | LINE チャネルID |
+| `LIFF_ORIGIN` | LIFF オリジン（通常 `https://liff.line.me`） |
+| `ALLOWED_ORIGINS` | CORS許可オリジン |
+
+オプション:
+| 環境変数 | 説明 |
+|---------|------|
+| `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile シークレットキー |
+
+### 3. 開発サーバーの起動
+
+```bash
 poetry run uvicorn app.main:app --reload --port 8000
 ```
 
+開発サーバーが `http://localhost:8000` で起動します。
+
+API ドキュメントは `http://localhost:8000/docs` で確認できます。
+
 ## デプロイ（Railway）
 
-### AWS SES 認証設定（2026年ベストプラクティス）
+1. Railway プロジェクトを作成
+2. GitHub リポジトリを接続
+3. 環境変数を設定
+4. PostgreSQL アドオンを追加
+5. デプロイ
 
-本番環境では **STS AssumeRole** を使用します。一時認証情報による高セキュリティな認証方式です。
+`railway.toml` に必要な設定が含まれています。
 
-#### 必要な AWS リソース
+## メール送信について
 
-1. **IAM Role**: `SES-Railway-Role`
-   - ポリシー: `AmazonSESFullAccess`（または `ses:SendEmail`, `ses:SendRawEmail` 権限）
-   - 信頼関係: AssumeRole 用ユーザーからのアクセスを許可
+このAPIは [Resend](https://resend.com/) を使用してメールを送信します。
 
-2. **IAM User**: `railway-sts-user`
-   - ポリシー: `sts:AssumeRole` 権限（上記 Role に対して）
-   - アクセスキー: Railway 環境変数に設定
+- 無料枠: 3,000通/月
+- HTML/テキスト両形式でメール送信
+- ユーザーへの確認メールと管理者への通知メールを同時送信
+- XSS対策としてユーザー入力をエスケープ処理
 
-#### Railway 環境変数
+## 関連リポジトリ
 
-```
-DATABASE_URL=postgresql+asyncpg://...
-AWS_REGION=us-east-2
-AWS_ACCESS_KEY_ID=<railway-sts-user のアクセスキー>
-AWS_SECRET_ACCESS_KEY=<railway-sts-user のシークレット>
-SES_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/SES-Railway-Role
-SES_FROM_EMAIL=no-reply@gizmodojp-line-bot.frwi.tech
-ADMIN_EMAIL=admin@example.com
-LINE_CHANNEL_ID=<LINE チャネルID>
-LIFF_ORIGIN=https://liff.line.me
-ALLOWED_ORIGINS=https://liff.line.me
-```
+| リポジトリ | 説明 |
+|-----------|------|
+| [giz_line_bot_contact_liff_web](https://github.com/FreeWiFi7749/giz_line_bot_contact_liff_web) | お問い合わせフォーム LIFF（フロントエンド） |
+| [giz_line_bot](https://github.com/FreeWiFi7749/giz_line_bot) | LINE Bot バックエンド |
+| [giz_line_analytics_web](https://github.com/FreeWiFi7749/giz_line_analytics_web) | LINE Analytics ダッシュボード |
+| [giz_line_delivery_app](https://github.com/FreeWiFi7749/giz_line_delivery_app) | 手動配信アプリ |
 
-#### 認証の仕組み
+## ライセンス
 
-- `SES_ROLE_ARN` が設定されている場合、STS AssumeRole で一時認証情報を取得
-- 認証情報は1時間有効、有効期限5分前に自動更新（キャッシング）
-- CloudTrail で全ての SES 送信を追跡可能
-
-#### 開発環境（オプション）
-
-`SES_ROLE_ARN` を空または未設定にすると、`AWS_ACCESS_KEY_ID` と `AWS_SECRET_ACCESS_KEY` を直接使用する IAM Access Key モードで動作します。
+MIT
