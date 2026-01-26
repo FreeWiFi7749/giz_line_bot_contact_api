@@ -159,10 +159,10 @@ API ドキュメントは `http://localhost:8000/docs` で確認できます。
 
 | リポジトリ | 説明 |
 |-----------|------|
-| [giz_line_bot_contact_liff_web](https://github.com/FreeWiFi7749/giz_line_bot_contact_liff_web) | お問い合わせフォーム LIFF（フロントエンド） |
-| [giz_line_bot](https://github.com/FreeWiFi7749/giz_line_bot) | LINE Bot バックエンド |
-| [giz_line_analytics_web](https://github.com/FreeWiFi7749/giz_line_analytics_web) | LINE Analytics ダッシュボード |
-| [giz_line_delivery_app](https://github.com/FreeWiFi7749/giz_line_delivery_app) | 手動配信アプリ |
+| [giz_line_bot_contact_liff_web](https://github.com/FreeWiFi7749/giz_line_bot_contact_liff_web) | お問い合わせフォーム LIFF（Next.js + Railway） |
+| [giz_line_bot](https://github.com/frwi-tech/giz_line_bot) | LINE Bot バックエンド（FastAPI + Railway） |
+| [giz_line_analytics_web](https://github.com/FreeWiFi7749/giz_line_analytics_web) | LINE Analytics ダッシュボード（Qwik + Cloudflare Pages） |
+| [giz_line_delivery_app](https://github.com/FreeWiFi7749/giz_line_delivery_app) | 手動配信アプリ（Qwik + Cloudflare Pages） |
 
 ## ライセンス
 
